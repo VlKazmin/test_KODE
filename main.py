@@ -1,52 +1,76 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from typing import Dict, List
 
-from typing import List
+from fastapi import Depends, FastAPI, status
+from pyaspeller import YandexSpeller
 
-import os
-import asyncio
-import json
+from file_operations.local_file import (
+    initial_notes_file,
+    read_data,
+    write_data,
+)
+from auth.authorization import get_current_user, initial_users_file
+from models.models import NoteCreate, NoteResponse
 
 app = FastAPI()
-DATA_FILE = "notes.json"
+speller = YandexSpeller()
 
 
-class Note(BaseModel):
-    title: str
-    content: str
+@app.post(
+    "/notes",
+    response_model=NoteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_note(
+    note: NoteCreate,
+    current_user: str = Depends(get_current_user),
+) -> Dict[str, any]:
+    """
+    Добавляет новую заметку.
 
+    Args:
+        note (NoteCreate): Объект `NoteCreate` с заголовком и
+        содержимым заметки.
+        current_user (str, optional): Имя текущего пользователя.
 
-def initial_data_file():
-    if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "w") as f:
-            json.dump([], f)
+    Returns:
+        Dict[str, any]: Возвращает добавленную заметку
+        в формате `NoteResponse`.
+    """
 
-
-async def read_data():
-    async with asyncio.Lock():
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-
-
-async def write_data(data):
-    async with asyncio.Lock():
-        with open(DATA_FILE, "r") as f:
-            return json.dump(data, f, indent=4)
-        
-@app.post("/notes", response_model=Note)
-async def add_note(note):
     notes = await read_data()
-    notes.append(note.dict()) # note.dict()
+    note_id = len(notes) + 1
+    new_note = {
+        "id": note_id,
+        "owner": current_user,
+        "title": speller.spelled(note.title),
+        "content": speller.spelled(note.content),
+    }
+
+    notes.append(new_note)
     await write_data(notes)
-    return note  # зачем?
-
-@app.get("/notes", response_model=list[Note])
-async def get_notes():
-    return await read_data()
-
-initial_data_file()
+    return new_note
 
 
+@app.get("/notes", response_model=List[NoteResponse])
+async def get_notes(
+    current_user: str = Depends(get_current_user),
+) -> List[Dict[str, any]]:
+    """
+    Получает список заметок текущего пользователя.
 
-        
+    Args:
+        current_user (str, optional): Имя текущего пользователя.
 
+    Returns:
+        List[Dict[str, any]]: Возвращает список заметок
+        в формате `NoteResponse`.
+
+    """
+
+    notes = await read_data()
+    user_notes = [note for note in notes if note["owner"] == current_user]
+    return user_notes
+
+
+initial_notes_file()
+initial_users_file()
