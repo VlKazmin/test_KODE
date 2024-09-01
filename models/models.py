@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 class NoteCreate(BaseModel):
     title: str
-    content: any
+    content: str
 
 
 class NoteResponse(BaseModel):
